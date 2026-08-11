@@ -29,9 +29,9 @@ The dataset expects the following structure under a root directory:
 └── bad_frames.json                 # Bad frame indices per patch
 ```
 
-Set `data.root` in the config to point to your data directory. 
-PASTIS-R：https://zenodo.org/records/5735646
-Global sampled data： 
+Set `data.root` in the config to point to your data directory. /
+PASTIS-R：https://zenodo.org/records/5735646/
+Global sampled data： /
 
 ## Training
 
