@@ -1,6 +1,6 @@
 # STRIDE
 
-**Source Code of Reconstructing cloud-free Sentinel-2 time series under complex degradations with state-driven spatio-temporal modeling**
+**Source Code of "Reconstructing cloud-free Sentinel-2 time series under complex degradations with state-driven spatio-temporal modeling"**
 
 
 ## Requirements
