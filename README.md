@@ -33,7 +33,7 @@ Set `data.root` in the config to point to your data directory.
 
 PASTIS-R：https://zenodo.org/records/5735646
 
-Global sampled data： 
+Global sampled data： It is currently being uploaded. Examples and metadata can be found in the "data" folder. 
 
 ## Training
 
