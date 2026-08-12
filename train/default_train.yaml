@@ -42,7 +42,7 @@ STRIDE:                                   # sen12_c2_tlgall3_1nosar1mf3
 training_settings:
     prediction_type: 'sample'              # Prediction type. ['epsilon', 'sample']
     batch_size: 4   #16                          # Batch size. 3    36 for EarthNet   12 too big  8 for 3DUnet
-    num_epochs: 1500                       # Number of training epochs.
+    num_epochs: 1500                       # Number of training epochs. 1500 for global sampled data, 3000 for PASTIS-R
     accum_iter: 1                          # Accumulate gradients for 'accum_iter` iterations.
     gradient_clip_norm: 0                  # If > 0, clips gradient norm to that value.
     gradient_clip_value: 0                 # If > 0, clips gradient at specified value.
