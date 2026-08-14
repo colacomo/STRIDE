@@ -105,22 +105,12 @@ def drop_path(x, drop_prob: float = 0., training: bool = False):
     return output
 
 
-class InteractionCloudBias(nn.Module):
-    """
-    Refined interactive cloud bias module.
-    Input cloud_mask: temporal version (B * H * W, T), spatial version (B*T, H * W)
-    Output bias: temporal version (B * H * W, T, T), spatial version (B*T, H * W, H * W)
-    """
+class SDIR(nn.Module):
 
     def __init__(self, hidden_dim=32):
         super().__init__()
-        # Core interaction feature dimensions:
-        # 1. Target_mask (i): whether target position has cloud
-        # 2. Source_mask (j): whether source position has cloud
-        # 3. Mask_diff: state difference (j - i), capturing the transition from clear to cloudy
-        # 4. Mask_combined: joint state (i * j)
         self.feature_dim = 4
-        self.dim=dim=1
+        self.dim=1
 
         self.mlp = nn.Sequential(
             nn.Linear(self.feature_dim, hidden_dim),
@@ -134,22 +124,11 @@ class InteractionCloudBias(nn.Module):
         # Learn a base scaling factor to control intervention strength on attention logits
         self.gain = nn.Parameter(torch.ones(1) * 1.0)
 
-    def forward(self, cloud_mask, hard_penalty=False):
-        """
-        cloud_mask: (N, T) - cloud detection values for each pixel at T timesteps (0: clear, 1: cloudy)
-        Returns: attention bias of shape (N, T, T)
-        """
-        N, T = cloud_mask.shape
-        # 1. Construct interaction matrix (N, T, T)
-        # mask_i (Target/Query): row vector, represents the target timestep state to be filled
-        mask_i = cloud_mask.unsqueeze(2).expand(-1, -1, T)  # (N, T, T)
-        # mask_j (Source/Key): column vector, represents the source timestep state to borrow information from
-        mask_j = cloud_mask.unsqueeze(1).expand(-1, T, -1)  # (N, T, T)
-
-        # 2. Extract asymmetric features
-        # diff > 0 means flow from clear (0) to cloudy (1), the most desirable information flow
+    def forward(self, mask, hard_penalty=False):
+        N, T = mask.shape
+        mask_i = mask.unsqueeze(2).expand(-1, -1, T)  # (N, T, T)
+        mask_j = mask.unsqueeze(1).expand(-1, T, -1)  # (N, T, T)
         mask_diff = mask_i - mask_j
-        # combined means both are cloudy, the worst case
         mask_combined = mask_i * mask_j
 
         # Stack features (N, T, T, 4)
@@ -161,16 +140,11 @@ class InteractionCloudBias(nn.Module):
         ], dim=-1).float()
 
         # 3. Compute bias mapping
-        # bias: (N, T, T)
         bias = self.mlp(features).squeeze(-1)
-        # print(bias.shape,features.shape)
 
         # 4. Physical constraint intervention (optional)
-        # If Source(j) is pure cloud (mask_j ≈ 1), force a large negative value (penalty)
-        # This ensures basic physical correctness even if the MLP has not fully learned
         if hard_penalty is True:
             hard_penalty = (mask_j > 0.99).float() * -10.0
-            #print(hard_penalty.shape)
             bias = bias + hard_penalty
         return bias * self.gain
 
@@ -235,7 +209,7 @@ class AdaLNSelfAttention(nn.Module):
             nn.SiLU(),
             nn.Linear(dim, 3 * dim)
         )
-        self.cloud_bias = InteractionCloudBias(dim)
+        self.SDIR = SDIR(dim)
 
         # Save last forward pass attn and cloud_reward for visualization
         self.first_attn = None
@@ -265,14 +239,10 @@ class AdaLNSelfAttention(nn.Module):
             attn = attn + attn_bias.unsqueeze(1)
         self.sec_attn = attn.detach()
         cloud_reward = None
-        #print(N)
         if attn_mask is not None and attn_mask.shape[1]<=256:
-            # If t_j is clear and t_i is cloudy, the model should tend to transfer pixels from t_j to t_i,
-            # and vice versa. Activated when attn_mask.shape[1]<=256 to avoid excessive computation.
-            #print(attn_mask.shape)
             if attn_mask.shape[1]<=35:
                 # Temporal branch
-                cloud_reward = self.cloud_bias(attn_mask)#,hard_penalty=True)
+                cloud_reward = self.SDIR(attn_mask,hard_penalty=False)
             else:
                 # Spatial branch
                 # 1. Spatial downsampling: 256 -> 64
@@ -286,7 +256,7 @@ class AdaLNSelfAttention(nn.Module):
                 mask_down = mask_down.view(-1, 64)
 
                 # 2. Compute lightweight cloud_reward: output shape [B, 64, 64]
-                cloud_reward_down = self.cloud_bias(mask_down)
+                cloud_reward_down = self.SDIR(mask_down,hard_penalty=False)
                 cloud_reward = upsample_interaction_matrix(
                     cloud_reward_down,
                     orig_shape=(8, 8),
@@ -418,7 +388,7 @@ class STBlock(nn.Module):
         self.mlp = ConvMLP(dim, dim, dim)
         self.dim = dim
 
-    def forward(self, x, sar, t_emb, s_emb, time_bias_self, time_bias_cross, totalmask_t, totalmask_s, cloudmask_t, cloudmask_s, B, T):
+    def forward(self, x, sar, t_emb, s_emb, time_bias_self, totalmask_t, totalmask_s, cloudmask_t, cloudmask_s, B, T):
         # x: (B*T, N, D)
 
         # Temporal Attention
@@ -427,7 +397,6 @@ class STBlock(nn.Module):
         x_t = rearrange(x, '(b t) n d -> (b n) t d', b=B, t=T)
         sar_t = rearrange(sar, '(b t) n d -> (b n) t d', b=B, t=T)
         tbs = time_bias_self.repeat_interleave(x_t.shape[0] // time_bias_self.shape[0], dim=0)
-        tbc = time_bias_cross.repeat_interleave(x_t.shape[0] // time_bias_cross.shape[0], dim=0)
         # date_emb_t = date_emb.repeat_interleave(x_t.shape[0] // date_emb.shape[0], dim=0)
         # print("t",t_emb.shape, x_t.shape)
         if t_emb.shape[0] != x_t.shape[0]:
@@ -470,7 +439,7 @@ class STBlock(nn.Module):
 
 
 
-class LieGroupTimeBias(nn.Module):
+class MMTE(nn.Module):
     # Lie group time bias: dynamic balance between translation invariance (R)
     # and periodicity (SO(2)) via learnable parameter beta
 
@@ -544,7 +513,7 @@ class LieGroupTimeBias(nn.Module):
         return output
 
 
-class ConditionTS_Block(nn.Module):
+class ASTT_Block(nn.Module):
     """
     Uses STBlock with four attention structures:
     - temporal_self
@@ -560,10 +529,8 @@ class ConditionTS_Block(nn.Module):
         # Directly reuse STBlock
         self.st_block = STBlock(hidden_size, num_heads, cross)
 
-        # Time bias and cloud bias
-        #self.time_bias = LieGroupTimeBias(hidden_size)
-        self.time_bias_s = LieGroupTimeBias(hidden_size)
-        self.time_bias_c = LieGroupTimeBias(hidden_size)
+        # Tempral bias and spatial bias
+        self.time_bias_s = MMTE(hidden_size)
 
         # MLP
         self.norm = nn.LayerNorm(hidden_size)
@@ -592,7 +559,6 @@ class ConditionTS_Block(nn.Module):
         dummy_dates = torch.arange(T, device=x.device).unsqueeze(0).repeat(B, 1)
         #print("dummy_dates", dummy_dates,dates)
         time_bias_self = self.time_bias_s(dates)
-        time_bias_cross = self.time_bias_c(dates)
         cloud_mask = F.interpolate(
             cloud_mask.float(), size=(1, H, W), mode='nearest')
         # cloudmask_ds: [B, T, 1, 16, 16]
@@ -623,7 +589,6 @@ class ConditionTS_Block(nn.Module):
             t_emb=c_t,
             s_emb=c_s,
             time_bias_self=time_bias_self,
-            time_bias_cross=time_bias_cross,
             totalmask_t=total_mask_t,
             totalmask_s=total_mask_s,
             cloudmask_t=cloud_mask_t,
@@ -949,13 +914,13 @@ class STRIDE_SAR(nn.Module):
 
         # --- Encoder ---
         for i in range(enc_depth):
-            self.layers.append(ConditionTS_Block(hidden_size, num_heads, mlp_ratio, num_frames, True))
+            self.layers.append(ASTT_Block(hidden_size, num_heads, mlp_ratio, num_frames, True))
             if i != enc_depth - 1:  # No further downsampling at deepest layer
                 self.layers.append(DownSample(hidden_size, hidden_size))  # * 2))
                 # hidden_size *= 2
 
         # --- Bottleneck ---
-        self.layers.append(ConditionTS_Block(hidden_size, num_heads, mlp_ratio, num_frames, True))
+        self.layers.append(ASTT_Block(hidden_size, num_heads, mlp_ratio, num_frames, True))
 
         # --- Decoder ---
         for i in range(enc_depth):
@@ -964,7 +929,7 @@ class STRIDE_SAR(nn.Module):
                 # hidden_size //= 2
             # SKFusion skip connection
             self.layers.append(SKFusion(hidden_size))
-            self.layers.append(ConditionTS_Block(hidden_size, num_heads, mlp_ratio, num_frames, True))
+            self.layers.append(ASTT_Block(hidden_size, num_heads, mlp_ratio, num_frames, True))
 
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels, self.num_frames)
         self.initialize_weights()
@@ -1117,7 +1082,7 @@ class STRIDE_SAR(nn.Module):
         idx = 0
         # --- Encoder ---
         # print("xci",x.shape, cond.shape)
-        while not isinstance(self.layers[idx], ConditionTS_Block) or len(skips) < (len(self.layers) + 1) // 4:
+        while not isinstance(self.layers[idx], ASTT_Block) or len(skips) < (len(self.layers) + 1) // 4:
             if isinstance(self.layers[idx], DownSample):
                 #print("xc",x.shape,cond.shape)
                 x, cond, h, w = self.layers[idx](x, cond, h, w)
@@ -1147,7 +1112,7 @@ class STRIDE_SAR(nn.Module):
                 x, cond, h, w = blk(x, cond, h, w)
             elif isinstance(blk, SKFusion):
                 x = blk(x, skips.pop())
-            else:  # ConditionTS_Block
+            else:  # ASTT_Block
                 #print(idx, "d", x.shape, c.shape, cond.shape, cloud_mask.shape)
                 if idx == watch_block_idx:
                     x, attn_out = blk(
