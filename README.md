@@ -33,7 +33,8 @@ Set `data.root` in the config to point to your data directory.
 
 PASTIS-R：https://zenodo.org/records/5735646
 
-Global sampled data： It is currently being uploaded. Examples and metadata can be found in the "data" folder. 
+Global sampled data：Baiduyun: <img width="1279" height="1706" alt="391410276712d70c7f01e5ecda69dfdf" src="https://github.com/user-attachments/assets/cd9f82d3-970a-4de4-9508-e2154d6183a0" /> code:vtty 
+ . Examples and metadata can be found in the "data" folder. 
 
 ## Training
 
