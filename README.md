@@ -31,10 +31,8 @@ The dataset expects the following structure under a root directory:
 
 Set `data.root` in the config to point to your data directory. 
 
+Global sampled data：Baiduyun: (https://pan.baidu.com/s/1jrCGjVw41OhRa2roYq9sWw?pwd=vtty) code:vtty. Examples and metadata can be found in the "data" folder. 
 PASTIS-R：https://zenodo.org/records/5735646
-
-Global sampled data：Baiduyun: (https://pan.baidu.com/s/1jrCGjVw41OhRa2roYq9sWw?pwd=vtty) code:vtty 
- . Examples and metadata can be found in the "data" folder. 
 
 ## Training
 
